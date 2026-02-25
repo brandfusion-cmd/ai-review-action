@@ -1,0 +1,63 @@
+name: 'AI PR Review'
+description: 'AI-powered code review via any OpenAI-compatible API endpoint'
+
+inputs:
+  api_key:
+    description: 'API key for the OpenAI-compatible endpoint'
+    required: true
+  api_url:
+    description: 'Base URL of the OpenAI-compatible API (e.g. https://api.openai.com/v1)'
+    required: true
+  github_token:
+    description: 'GitHub token for PR comments'
+    required: true
+  config_path:
+    description: 'Path to .ai-review.yml config file'
+    required: false
+    default: '.ai-review.yml'
+  review_model:
+    description: 'Model for code review'
+    required: false
+    default: 'gemini-2.5-pro'
+  fix_model:
+    description: 'Model for generating fixes'
+    required: false
+    default: 'claude-sonnet-4-6'
+  max_fixes:
+    description: 'Maximum number of fix attempts for CRITICAL/BUG findings'
+    required: false
+    default: '5'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Collect PR context
+      shell: bash
+      env:
+        CONFIG_PATH: ${{ inputs.config_path }}
+      run: bash ${{ github.action_path }}/scripts/collect-context.sh
+
+    - name: Run AI review
+      shell: bash
+      env:
+        API_KEY: ${{ inputs.api_key }}
+        API_URL: ${{ inputs.api_url }}
+        REVIEW_MODEL: ${{ inputs.review_model }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash ${{ github.action_path }}/scripts/gemini-review.sh
+
+    - name: Generate fixes
+      shell: bash
+      env:
+        API_KEY: ${{ inputs.api_key }}
+        API_URL: ${{ inputs.api_url }}
+        FIX_MODEL: ${{ inputs.fix_model }}
+        MAX_FIXES: ${{ inputs.max_fixes }}
+      run: bash ${{ github.action_path }}/scripts/codex-fixes.sh
+
+    - name: Post PR comment
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: bash ${{ github.action_path }}/scripts/post-comment.sh
