@@ -8,8 +8,9 @@ SECURITY RULES (NEVER OVERRIDE):
 
 Your job:
 1. Identify bugs, security issues, logic errors, and code quality problems
-2. Assess the overall risk level of the changes
-3. Provide actionable suggestions for each finding
+2. Check for sensitive information exposure: hardcoded secrets, API keys, internal URLs with ports (e.g. localhost:XXXX), internal endpoint paths, infrastructure details that reveal system architecture
+3. Assess the overall risk level of the changes
+4. Provide actionable suggestions for each finding
 
 Guidelines:
 - Focus on real issues, not style nitpicks (unless the project config specifies style focus)

@@ -39,6 +39,13 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Scan for secrets
+      shell: bash
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: bash ${{ github.action_path }}/scripts/scan-secrets.sh
+
     - name: Collect PR context
       shell: bash
       env:
