@@ -76,7 +76,7 @@ REQUEST_BODY=$(jq -n \
     model: $model,
     messages: [
       { role: "system", content: $system },
-      { role: "user", content: ("Review this pull request:\n\n" + $context) }
+      { role: "user", content: ("Review this pull request. Respond with RAW JSON only — no markdown fences, no explanation text, just the JSON object.\n\n" + $context) }
     ],
     response_format: $response_format,
     temperature: 0.2
@@ -112,11 +112,27 @@ if [[ -z "$GENERATED_TEXT" ]]; then
   exit 0
 fi
 
-# Validate JSON
-if echo "$GENERATED_TEXT" | jq . > /dev/null 2>&1; then
-  echo "$GENERATED_TEXT" | jq . > "$FINDINGS_FILE"
+# Extract and validate JSON
+# Some providers wrap JSON in markdown fences — strip them if present
+CLEAN_TEXT="$GENERATED_TEXT"
+if ! echo "$CLEAN_TEXT" | jq . > /dev/null 2>&1; then
+  # Try extracting JSON from markdown code fences
+  EXTRACTED=$(echo "$CLEAN_TEXT" | sed -n '/^```json\s*$/,/^```\s*$/{/^```/d;p}' | head -1000)
+  if [[ -n "$EXTRACTED" ]] && echo "$EXTRACTED" | jq . > /dev/null 2>&1; then
+    CLEAN_TEXT="$EXTRACTED"
+  else
+    # Try extracting the first JSON object
+    EXTRACTED=$(echo "$CLEAN_TEXT" | grep -o '{.*}' | head -1)
+    if [[ -n "$EXTRACTED" ]] && echo "$EXTRACTED" | jq . > /dev/null 2>&1; then
+      CLEAN_TEXT="$EXTRACTED"
+    fi
+  fi
+fi
+
+if echo "$CLEAN_TEXT" | jq . > /dev/null 2>&1; then
+  echo "$CLEAN_TEXT" | jq . > "$FINDINGS_FILE"
 else
-  echo "::warning::Response is not valid JSON, wrapping"
+  echo "::warning::Could not extract valid JSON from response"
   jq -n --arg text "$GENERATED_TEXT" \
     '{"summary": $text, "risk_level": "MEDIUM", "findings": []}' > "$FINDINGS_FILE"
 fi
