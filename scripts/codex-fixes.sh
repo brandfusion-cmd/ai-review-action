@@ -43,7 +43,8 @@ CHANGED_FILES_LIST="${CHANGED_FILES_LIST:-$WORKDIR/changed-files.txt}"
 # Phase 1: Validate findings and prepare request bodies (sequential, fast)
 # ============================================================
 VALID_INDICES=()
-declare -A SOURCE_CACHE
+SOURCE_CACHE_DIR="$WORKDIR/source-cache"
+mkdir -p "$SOURCE_CACHE_DIR"
 
 for i in $(seq 0 $(( CRITICAL_COUNT - 1 ))); do
   [[ "${#VALID_INDICES[@]}" -ge "$MAX_FIXES" ]] && break
@@ -67,14 +68,16 @@ for i in $(seq 0 $(( CRITICAL_COUNT - 1 ))); do
     continue
   fi
 
-  # Cache source content (avoid re-reading same file)
-  if [[ -z "${SOURCE_CACHE[$FILE]:-}" ]]; then
-    SOURCE_CACHE[$FILE]=$(cat "$FILE")
+  # Cache source content via files (Bash 3.2 compatible, no declare -A)
+  CACHE_KEY=$(printf '%s' "$FILE" | md5 -q 2>/dev/null || printf '%s' "$FILE" | md5sum | cut -d' ' -f1)
+  CACHE_FILE="$SOURCE_CACHE_DIR/$CACHE_KEY"
+  if [[ ! -f "$CACHE_FILE" ]]; then
+    cp "$FILE" "$CACHE_FILE"
   fi
 
   DESCRIPTION=$(echo "$FINDING" | jq -r '.description')
   SUGGESTION=$(echo "$FINDING" | jq -r '.suggestion')
-  SOURCE_CONTENT="${SOURCE_CACHE[$FILE]}"
+  SOURCE_CONTENT=$(cat "$CACHE_FILE")
 
   PROMPT="You are a code fixer. Fix the following issue in the file.
 
@@ -223,7 +226,7 @@ echo "$FIXES_ARRAY" | jq . > "$FIXES_FILE"
 TOTAL_FIXES=$(jq 'length' "$FIXES_FILE")
 echo "Generated $TOTAL_FIXES fixes"
 
-# Cleanup request files
-rm -f "$WORKDIR"/fix-request-*.json "$WORKDIR"/fix-http-*.txt
+# Cleanup temp files
+rm -rf "$WORKDIR"/fix-request-*.json "$WORKDIR"/fix-http-*.txt "$SOURCE_CACHE_DIR"
 
 echo "::endgroup::"
