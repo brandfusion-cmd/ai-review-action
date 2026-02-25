@@ -9,6 +9,8 @@ WORKDIR="/tmp/ai-review"
 FINDINGS_FILE="$WORKDIR/findings.json"
 FIXES_FILE="$WORKDIR/fixes.json"
 MAX_FIXES="${MAX_FIXES:-5}"
+# Hard cap to prevent abuse
+(( MAX_FIXES > 10 )) && MAX_FIXES=10
 
 echo "::group::Generating fixes"
 
@@ -48,6 +50,14 @@ for i in $(seq 0 $(( CRITICAL_COUNT - 1 ))); do
   LINE=$(echo "$FINDING" | jq -r '.line // "unknown"')
 
   echo "Fix $((FIX_COUNT + 1))/$MAX_FIXES: [$SEVERITY] $FILE:$LINE"
+
+  # Validate file path: must be in the changed-files list (prevent path traversal from AI output)
+  CHANGED_FILES_LIST="${CHANGED_FILES_LIST:-$WORKDIR/changed-files.txt}"
+  if [[ -f "$CHANGED_FILES_LIST" ]] && ! grep -qxF "$FILE" "$CHANGED_FILES_LIST"; then
+    echo "  File '$FILE' not in changed-files list, skipping (path traversal protection)"
+    FIX_COUNT=$((FIX_COUNT + 1))
+    continue
+  fi
 
   # Skip if file doesn't exist
   if [[ ! -f "$FILE" ]]; then

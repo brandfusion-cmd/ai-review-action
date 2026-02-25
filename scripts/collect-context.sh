@@ -5,7 +5,9 @@ set -euo pipefail
 # Output: /tmp/ai-review/context.txt, /tmp/ai-review/config.yml
 
 WORKDIR="/tmp/ai-review"
+rm -rf "$WORKDIR"
 mkdir -p "$WORKDIR"
+chmod 700 "$WORKDIR"
 
 echo "::group::Collecting PR context"
 

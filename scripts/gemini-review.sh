@@ -94,8 +94,8 @@ HTTP_CODE=$(curl -s -w "%{http_code}" -o "$WORKDIR/api-response.json" \
   --max-time 180)
 
 if [[ "$HTTP_CODE" != "200" ]]; then
-  echo "::error::OpenAI-compatible API returned HTTP $HTTP_CODE"
-  cat "$WORKDIR/api-response.json" >&2
+  ERROR_MSG=$(jq -r '.error.message // .error // "Unknown error"' "$WORKDIR/api-response.json" 2>/dev/null || echo "Could not parse error")
+  echo "::error::API returned HTTP $HTTP_CODE: $ERROR_MSG"
   # Create empty findings so pipeline continues
   echo '{"summary":"Review API call failed","risk_level":"MEDIUM","findings":[]}' > "$FINDINGS_FILE"
   echo "::endgroup::"

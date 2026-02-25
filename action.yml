@@ -44,7 +44,9 @@ runs:
         API_URL: ${{ inputs.api_url }}
         REVIEW_MODEL: ${{ inputs.review_model }}
         ACTION_PATH: ${{ github.action_path }}
-      run: bash ${{ github.action_path }}/scripts/gemini-review.sh
+      run: |
+        echo "::add-mask::${API_KEY}"
+        bash ${{ github.action_path }}/scripts/gemini-review.sh
 
     - name: Generate fixes
       shell: bash
@@ -53,7 +55,10 @@ runs:
         API_URL: ${{ inputs.api_url }}
         FIX_MODEL: ${{ inputs.fix_model }}
         MAX_FIXES: ${{ inputs.max_fixes }}
-      run: bash ${{ github.action_path }}/scripts/codex-fixes.sh
+        CHANGED_FILES_LIST: /tmp/ai-review/changed-files.txt
+      run: |
+        echo "::add-mask::${API_KEY}"
+        bash ${{ github.action_path }}/scripts/codex-fixes.sh
 
     - name: Post PR comment
       shell: bash
@@ -61,3 +66,8 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github_token }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
       run: bash ${{ github.action_path }}/scripts/post-comment.sh
+
+    - name: Cleanup temp files
+      if: always()
+      shell: bash
+      run: rm -rf /tmp/ai-review
