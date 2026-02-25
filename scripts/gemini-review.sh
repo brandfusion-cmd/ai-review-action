@@ -91,7 +91,7 @@ HTTP_CODE=$(curl -s -w "%{http_code}" -o "$WORKDIR/api-response.json" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${API_KEY}" \
   -d "$REQUEST_BODY" \
-  --max-time 180)
+  --max-time 60)
 
 if [[ "$HTTP_CODE" != "200" ]]; then
   ERROR_MSG=$(jq -r '.error.message // .error // "Unknown error"' "$WORKDIR/api-response.json" 2>/dev/null || echo "Could not parse error")

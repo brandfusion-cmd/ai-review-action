@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # Generate fixes for CRITICAL/BUG findings via OpenAI-compatible chat completions
+# Uses parallel API calls for speed (Phase 1: validate, Phase 2: parallel API, Phase 3: collect)
 # Input: /tmp/ai-review/findings.json
 # Output: /tmp/ai-review/fixes.json
 
@@ -36,37 +37,44 @@ fi
 echo "Found $CRITICAL_COUNT CRITICAL/BUG findings, generating fixes (max $MAX_FIXES, model: $FIX_MODEL)"
 
 ENDPOINT="${API_URL}/chat/completions"
-FIX_COUNT=0
-FIXES_ARRAY="[]"
+CHANGED_FILES_LIST="${CHANGED_FILES_LIST:-$WORKDIR/changed-files.txt}"
+
+# ============================================================
+# Phase 1: Validate findings and prepare request bodies (sequential, fast)
+# ============================================================
+VALID_INDICES=()
+declare -A SOURCE_CACHE
 
 for i in $(seq 0 $(( CRITICAL_COUNT - 1 ))); do
-  [[ "$FIX_COUNT" -ge "$MAX_FIXES" ]] && break
+  [[ "${#VALID_INDICES[@]}" -ge "$MAX_FIXES" ]] && break
 
   FINDING=$(echo "$CRITICAL_FINDINGS" | jq ".[$i]")
-  SEVERITY=$(echo "$FINDING" | jq -r '.severity')
   FILE=$(echo "$FINDING" | jq -r '.file')
-  DESCRIPTION=$(echo "$FINDING" | jq -r '.description')
-  SUGGESTION=$(echo "$FINDING" | jq -r '.suggestion')
+  SEVERITY=$(echo "$FINDING" | jq -r '.severity')
   LINE=$(echo "$FINDING" | jq -r '.line // "unknown"')
 
-  echo "Fix $((FIX_COUNT + 1))/$MAX_FIXES: [$SEVERITY] $FILE:$LINE"
+  echo "Validating: [$SEVERITY] $FILE:$LINE"
 
   # Validate file path: must be in the changed-files list (prevent path traversal from AI output)
-  CHANGED_FILES_LIST="${CHANGED_FILES_LIST:-$WORKDIR/changed-files.txt}"
   if [[ -f "$CHANGED_FILES_LIST" ]] && ! grep -qxF "$FILE" "$CHANGED_FILES_LIST"; then
     echo "  File '$FILE' not in changed-files list, skipping (path traversal protection)"
-    FIX_COUNT=$((FIX_COUNT + 1))
     continue
   fi
 
   # Skip if file doesn't exist
   if [[ ! -f "$FILE" ]]; then
     echo "  File not found, skipping"
-    FIX_COUNT=$((FIX_COUNT + 1))
     continue
   fi
 
-  SOURCE_CONTENT=$(cat "$FILE")
+  # Cache source content (avoid re-reading same file)
+  if [[ -z "${SOURCE_CACHE[$FILE]:-}" ]]; then
+    SOURCE_CACHE[$FILE]=$(cat "$FILE")
+  fi
+
+  DESCRIPTION=$(echo "$FINDING" | jq -r '.description')
+  SUGGESTION=$(echo "$FINDING" | jq -r '.suggestion')
+  SOURCE_CONTENT="${SOURCE_CACHE[$FILE]}"
 
   PROMPT="You are a code fixer. Fix the following issue in the file.
 
@@ -100,26 +108,80 @@ Do NOT include markdown fences. Respond with raw JSON only."
     }'
   )
 
-  FIX_RESPONSE="$WORKDIR/fix-response-${i}.json"
+  echo "$REQUEST_BODY" > "$WORKDIR/fix-request-${i}.json"
+  VALID_INDICES+=("$i")
+  echo "  Validated, queued for fix"
+done
 
-  HTTP_CODE=$(curl -s -w "%{http_code}" -o "$FIX_RESPONSE" \
+VALID_COUNT="${#VALID_INDICES[@]}"
+if [[ "$VALID_COUNT" -eq 0 ]]; then
+  echo "No valid findings to fix"
+  echo "::endgroup::"
+  exit 0
+fi
+
+echo ""
+echo "Phase 2: Sending $VALID_COUNT API calls in parallel..."
+
+# ============================================================
+# Phase 2: Fire all API calls in parallel
+# ============================================================
+PIDS=()
+for i in "${VALID_INDICES[@]}"; do
+  FIX_RESPONSE="$WORKDIR/fix-response-${i}.json"
+  FIX_HTTP="$WORKDIR/fix-http-${i}.txt"
+
+  curl -s -w "%{http_code}" -o "$FIX_RESPONSE" \
     -X POST "$ENDPOINT" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${API_KEY}" \
-    -d "$REQUEST_BODY" \
-    --max-time 120)
+    -d @"$WORKDIR/fix-request-${i}.json" \
+    --max-time 45 > "$FIX_HTTP" 2>/dev/null &
 
+  PIDS+=("$!")
+done
+
+# Wait for all parallel requests
+FAILED=0
+for pid in "${PIDS[@]}"; do
+  wait "$pid" || FAILED=$((FAILED + 1))
+done
+
+if [[ "$FAILED" -gt 0 ]]; then
+  echo "  $FAILED API call(s) failed or timed out"
+fi
+
+echo ""
+echo "Phase 3: Collecting results..."
+
+# ============================================================
+# Phase 3: Collect results (sequential)
+# ============================================================
+FIXES_ARRAY="[]"
+
+for i in "${VALID_INDICES[@]}"; do
+  FINDING=$(echo "$CRITICAL_FINDINGS" | jq ".[$i]")
+  FILE=$(echo "$FINDING" | jq -r '.file')
+  SEVERITY=$(echo "$FINDING" | jq -r '.severity')
+  DESCRIPTION=$(echo "$FINDING" | jq -r '.description')
+  LINE=$(echo "$FINDING" | jq -r '.line // "unknown"')
+
+  FIX_RESPONSE="$WORKDIR/fix-response-${i}.json"
+  FIX_HTTP="$WORKDIR/fix-http-${i}.txt"
+
+  echo "Collecting: [$SEVERITY] $FILE:$LINE"
+
+  # Check HTTP status
+  HTTP_CODE=$(cat "$FIX_HTTP" 2>/dev/null || echo "000")
   if [[ "$HTTP_CODE" != "200" ]]; then
     echo "  API returned HTTP $HTTP_CODE, skipping"
-    FIX_COUNT=$((FIX_COUNT + 1))
     continue
   fi
 
-  FIX_TEXT=$(jq -r '.choices[0].message.content // empty' "$FIX_RESPONSE")
+  FIX_TEXT=$(jq -r '.choices[0].message.content // empty' "$FIX_RESPONSE" 2>/dev/null)
 
   if [[ -z "$FIX_TEXT" ]]; then
     echo "  Empty response, skipping"
-    FIX_COUNT=$((FIX_COUNT + 1))
     continue
   fi
 
@@ -129,7 +191,6 @@ Do NOT include markdown fences. Respond with raw JSON only."
 
   if [[ -z "$FIXED_CODE" ]]; then
     echo "  Could not extract fixed code, skipping"
-    FIX_COUNT=$((FIX_COUNT + 1))
     continue
   fi
 
@@ -155,12 +216,14 @@ Do NOT include markdown fences. Respond with raw JSON only."
   fi
 
   rm -f "$ORIG_TMP" "$FIXED_TMP"
-  FIX_COUNT=$((FIX_COUNT + 1))
 done
 
 echo "$FIXES_ARRAY" | jq . > "$FIXES_FILE"
 
 TOTAL_FIXES=$(jq 'length' "$FIXES_FILE")
 echo "Generated $TOTAL_FIXES fixes"
+
+# Cleanup request files
+rm -f "$WORKDIR"/fix-request-*.json "$WORKDIR"/fix-http-*.txt
 
 echo "::endgroup::"
