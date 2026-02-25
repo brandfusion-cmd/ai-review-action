@@ -130,9 +130,9 @@ if ! echo "$CLEAN_TEXT" | jq . > /dev/null 2>&1; then
 fi
 
 if echo "$CLEAN_TEXT" | jq . > /dev/null 2>&1; then
-  # Normalize field names: some models use "path" instead of "file"
+  # Normalize field names: models use "path", "file_path", "filename" instead of "file"
   echo "$CLEAN_TEXT" | jq '
-    .findings = [.findings[] | .file = (.file // .path // "unknown") | del(.path)]
+    .findings = [.findings[] | .file = (.file // .file_path // .path // .filename // "unknown") | del(.path, .file_path, .filename)]
     | .summary = (.summary // "Review completed")
     | .risk_level = (.risk_level // "MEDIUM")
   ' > "$FINDINGS_FILE"
