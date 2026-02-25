@@ -130,11 +130,15 @@ if ! echo "$CLEAN_TEXT" | jq . > /dev/null 2>&1; then
 fi
 
 if echo "$CLEAN_TEXT" | jq . > /dev/null 2>&1; then
-  # Normalize field names: models use "path", "file_path", "filename" instead of "file"
+  # Normalize field names: models use "path"/"file_path"/"filename" instead of "file", "type" instead of "severity"
   echo "$CLEAN_TEXT" | jq '
-    .findings = [.findings[] | .file = (.file // .file_path // .path // .filename // "unknown") | del(.path, .file_path, .filename)]
+    .findings = [.findings[] |
+      .file = (.file // .file_path // .path // .filename // "unknown") |
+      .severity = (.severity // .type // "WARNING") |
+      del(.path, .file_path, .filename, .type)]
     | .summary = (.summary // "Review completed")
-    | .risk_level = (.risk_level // "MEDIUM")
+    | .risk_level = (.risk_level // .risk // "MEDIUM")
+    | del(.risk)
   ' > "$FINDINGS_FILE"
 else
   echo "::warning::Could not extract valid JSON from response"
