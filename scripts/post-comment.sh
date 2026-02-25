@@ -46,7 +46,7 @@ esac
     echo "| Severity | File | Description | Suggestion |"
     echo "|----------|------|-------------|------------|"
 
-    jq -r '.findings[] | "| \(.severity) | `\(.file)`:\(.line // "-") | \(.description | gsub("\n"; " ") | gsub("\\|"; "/")) | \(.suggestion | gsub("\n"; " ") | gsub("\\|"; "/")) |"' "$FINDINGS_FILE"
+    jq -r '.findings[] | "| \(.severity) | `\(.file // .path // "?")`:\(.line // "-") | \(.description | gsub("\n"; " ") | gsub("\\|"; "/")) | \(.suggestion | gsub("\n"; " ") | gsub("\\|"; "/")) |"' "$FINDINGS_FILE"
 
     echo ""
 

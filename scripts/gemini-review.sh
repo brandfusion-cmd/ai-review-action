@@ -130,7 +130,12 @@ if ! echo "$CLEAN_TEXT" | jq . > /dev/null 2>&1; then
 fi
 
 if echo "$CLEAN_TEXT" | jq . > /dev/null 2>&1; then
-  echo "$CLEAN_TEXT" | jq . > "$FINDINGS_FILE"
+  # Normalize field names: some models use "path" instead of "file"
+  echo "$CLEAN_TEXT" | jq '
+    .findings = [.findings[] | .file = (.file // .path // "unknown") | del(.path)]
+    | .summary = (.summary // "Review completed")
+    | .risk_level = (.risk_level // "MEDIUM")
+  ' > "$FINDINGS_FILE"
 else
   echo "::warning::Could not extract valid JSON from response"
   jq -n --arg text "$GENERATED_TEXT" \
