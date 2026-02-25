@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Notify an external agent (e.g. Agent Zero) about CRITICAL/BUG findings
+# Notify an external agent about CRITICAL/BUG findings via webhook
 # Reads findings.json and sends a structured message via API
 # Skips gracefully if AGENT_API_URL is not configured (no breaking change)
 

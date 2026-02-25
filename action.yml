@@ -28,7 +28,7 @@ inputs:
     required: false
     default: '5'
   agent_api_url:
-    description: 'Agent API URL for auto-fix notifications (optional, e.g. http://localhost:50080/api_message)'
+    description: 'Agent API URL for auto-fix notifications (optional)'
     required: false
     default: ''
   agent_api_key:
