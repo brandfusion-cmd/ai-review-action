@@ -116,13 +116,13 @@ fi
 # Some providers wrap JSON in markdown fences — strip them if present
 CLEAN_TEXT="$GENERATED_TEXT"
 if ! echo "$CLEAN_TEXT" | jq . > /dev/null 2>&1; then
-  # Try extracting JSON from markdown code fences
-  EXTRACTED=$(echo "$CLEAN_TEXT" | sed -n '/^```json\s*$/,/^```\s*$/{/^```/d;p}' | head -1000)
+  # Try extracting JSON from markdown code fences (awk for BSD/GNU compat)
+  EXTRACTED=$(echo "$CLEAN_TEXT" | awk '/^```json/{found=1;next} /^```/{found=0} found' | head -1000)
   if [[ -n "$EXTRACTED" ]] && echo "$EXTRACTED" | jq . > /dev/null 2>&1; then
     CLEAN_TEXT="$EXTRACTED"
   else
-    # Try extracting the first JSON object
-    EXTRACTED=$(echo "$CLEAN_TEXT" | grep -o '{.*}' | head -1)
+    # Try extracting JSON between first { and last }
+    EXTRACTED=$(echo "$CLEAN_TEXT" | awk 'BEGIN{p=0} /{/{p=1} p{print} /}/{if(p) exit}')
     if [[ -n "$EXTRACTED" ]] && echo "$EXTRACTED" | jq . > /dev/null 2>&1; then
       CLEAN_TEXT="$EXTRACTED"
     fi
