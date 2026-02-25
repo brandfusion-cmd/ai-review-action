@@ -83,7 +83,9 @@ runs:
         AGENT_API_KEY: ${{ inputs.agent_api_key }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         PR_BRANCH: ${{ github.head_ref }}
-      run: bash ${{ github.action_path }}/scripts/notify-agent.sh
+      run: |
+        echo "::add-mask::${AGENT_API_KEY}"
+        bash ${{ github.action_path }}/scripts/notify-agent.sh
 
     - name: Cleanup temp files
       if: always()
