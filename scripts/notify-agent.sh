@@ -91,7 +91,7 @@ _send_with_context() {
     -H "Content-Type: application/json" \
     -H "X-API-KEY: $AGENT_API_KEY" \
     -d "$body" \
-    --max-time 30 2>/dev/null || echo -e "\n000"
+    --max-time 180 2>/dev/null || echo -e "\n000"
 }
 
 RESPONSE=$(_send_with_context "$CONTEXT_ID")
