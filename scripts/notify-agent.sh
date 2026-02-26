@@ -3,10 +3,13 @@ set -euo pipefail
 
 # Notify an external agent about CRITICAL/BUG findings via webhook
 # Reads findings.json and sends a structured message via API
+# Uses persistent per-repo chat IDs (~/.a0-chat-ids/) so all notifications
+# for a repo go to one chat instead of creating a new one each time.
 # Skips gracefully if AGENT_API_URL is not configured (no breaking change)
 
 WORKDIR="/tmp/ai-review"
 FINDINGS_FILE="$WORKDIR/findings.json"
+CHAT_ID_DIR="${HOME}/.a0-chat-ids"
 
 # Skip if no agent URL configured
 if [[ -z "${AGENT_API_URL:-}" ]]; then
@@ -63,18 +66,54 @@ Instructions:
 3. Run tests before committing
 4. Push fixes to the same branch (this triggers automatic re-review)"
 
+# Persistent chat ID per repo
+REPO_SLUG="${GITHUB_REPOSITORY:-unknown}"
+REPO_SLUG="${REPO_SLUG//\//-}"
+mkdir -p "$CHAT_ID_DIR"
+CHAT_ID_FILE="$CHAT_ID_DIR/$REPO_SLUG"
+CONTEXT_ID=""
+if [[ -f "$CHAT_ID_FILE" ]]; then
+  CONTEXT_ID=$(cat "$CHAT_ID_FILE" 2>/dev/null || true)
+fi
+
 # Send to agent API
 MESSAGE_JSON=$(printf '%s' "$FINDINGS_TEXT" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null)
 
-HTTP_CODE=$(curl -s -w "%{http_code}" -o /dev/null \
-  -X POST "$AGENT_API_URL" \
-  -H "Content-Type: application/json" \
-  -H "X-API-KEY: $AGENT_API_KEY" \
-  -d "{\"message\": ${MESSAGE_JSON}, \"lifetime_hours\": 24}" \
-  --max-time 15) || true
+_send_with_context() {
+  local ctx="$1"
+  local body="{\"message\": ${MESSAGE_JSON}, \"lifetime_hours\": 168"
+  if [[ -n "$ctx" ]]; then
+    body="${body}, \"context_id\": \"${ctx}\""
+  fi
+  body="${body}}"
+
+  curl -s -w "\n%{http_code}" -X POST "$AGENT_API_URL" \
+    -H "Content-Type: application/json" \
+    -H "X-API-KEY: $AGENT_API_KEY" \
+    -d "$body" \
+    --max-time 30 2>/dev/null || echo -e "\n000"
+}
+
+RESPONSE=$(_send_with_context "$CONTEXT_ID")
+HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+RESP_BODY=$(echo "$RESPONSE" | sed '$d')
+
+# 404 = context expired/gone, retry without context_id
+if [[ "$HTTP_CODE" == "404" && -n "$CONTEXT_ID" ]]; then
+  echo "Previous chat expired, creating new one"
+  rm -f "$CHAT_ID_FILE"
+  RESPONSE=$(_send_with_context "")
+  HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+  RESP_BODY=$(echo "$RESPONSE" | sed '$d')
+fi
 
 if [[ "$HTTP_CODE" == "200" ]]; then
-  echo "Agent notified successfully"
+  # Save context_id for next time
+  NEW_ID=$(echo "$RESP_BODY" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("context_id",""))' 2>/dev/null || true)
+  if [[ -n "$NEW_ID" ]]; then
+    echo "$NEW_ID" > "$CHAT_ID_FILE"
+  fi
+  echo "Agent notified successfully (chat: ${NEW_ID:-unknown})"
 else
   echo "::warning::Agent notification returned HTTP $HTTP_CODE (non-fatal)"
 fi
